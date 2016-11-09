@@ -9,7 +9,8 @@ When this script is not being executed via terminal, a simple GUI dialog
 will be made available for end-users.
 
 Programs used are:
-yad
-youtube-dl
-xclip
-zenity
+* mplayer
+* yad
+* youtube-dl
+* xclip
+* zenity
