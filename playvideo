@@ -1,0 +1,277 @@
+#!/bin/bash
+
+function get_clipboard_data() {
+  
+  if hash xclip 2>/dev/null; then
+  
+    CLIPBOARD=$(xclip -out)
+    
+  else
+    
+    echo "$0: error: No clipboard handler was found."
+    exit 1
+    
+  fi
+  
+}
+
+ARGUMENT=$1
+CLIPBOARD=$(xclip -out)
+TIMEOUT=3
+
+# Check which resource might be a potential URL
+if [[ ${ARGUMENT} = http* ]]; then
+  
+  STRING=$1
+  echo Reading URL from input
+  sleep ${TIMEOUT}
+  
+elif [[ ${CLIPBOARD} = http* ]]; then
+  
+  STRING=$CLIPBOARD
+  echo Reading URL from clipboard
+  sleep ${TIMEOUT}
+  
+else
+  
+  echo "$0: error: You must provide a URL."
+  exit 1
+  
+fi
+
+notify-send \
+--urgency=low \
+--expire-time=5000 \
+--icon=go-up \
+"Program Starts" \
+"Process has been initiated"
+
+# Retrieve title
+function get_title() {
+  
+  python \
+  youtube-dl \
+  --get-title "$STRING"
+  
+}
+
+# Retrieve url
+function get_url() {
+  
+  # Check if variable $FORMAT is unset [ -z ${FORMAT+x} ]
+  # or Set $FORMAT to 0 and check whether it remains 0
+  if [ -z ${FORMAT+x} ]; then
+    
+    python \
+    youtube-dl \
+    --get-url "$STRING" \
+    --prefer-free-formats
+    
+  else
+    
+    python \
+    youtube-dl \
+    --get-url "$STRING" \
+    --format "$FORMAT"
+    
+  fi
+  
+}
+
+# Download video
+function get_video() {
+  
+  if [ -z ${DIALOG+x} ]; then
+    
+    python \
+    youtube-dl "$STRING" \
+    --output "%(extractor)s_%(id)s_%(title)s.%(ext)s" \
+    --restrict-filenames \
+    --prefer-free-formats
+    # TODO lowercase characters
+    
+  else
+    
+    python \
+    youtube-dl "$STRING" \
+    --output "%(extractor)s_%(id)s_%(title)s.%(ext)s" \
+    --restrict-filenames \
+    --prefer-free-formats \
+    --newline
+    # TODO lowercase characters
+    
+  fi
+}
+
+# Launch download dialog
+function dialog_question() {
+  
+  if hash zenity 2>/dev/null; then
+    
+    DIALOG=zenity
+    ANSWER=$(
+             zenity \
+             --question \
+             --text="Do you want to save video \"$TITLE\" to your drive?" \
+             --ok-label="Yes" \
+             --cancel-label="No"
+             echo $?
+            )
+    
+  elif hash yad 2>/dev/null; then
+    
+    DIALOG=yad
+    ANSWER=$(
+             yad \
+             --question \
+             --text="Do you want to save video \"$TITLE\" to your drive?" \
+             --ok-label="Yes" \
+             --cancel-label="No"
+             echo $?
+            )
+    
+  # see also kdialog, wenity, xdialog
+  
+  fi
+  
+}
+
+# Manipulate output to numeric percents
+function set_value_percent() {
+  
+  # http://askubuntu.com/questions/635504/youtube-dl-file-download-progress-with-zenity-progress-bar
+  grep \
+  --line-buffered \
+  -oP '^\[download\].*?\K([0-9.]+\%|#\d+ of \d)'
+  
+}
+
+# Launch progress dialog
+function dialog_progress() {  
+  
+  #if [ -z ${DIALOG+x} ]; then
+    
+    ${DIALOG} \
+    --progress \
+    --title="Media Download" \
+    --text="Downloading media..." \
+    --percentage=0 \
+    --auto-close \
+    --no-cancel \
+    --time-remaining
+    
+  #elif kdialog; then
+    
+  #fi
+  
+}
+
+# Set format quality for specific websites
+case ${STRING} in
+  
+  *"dailymotion.com"*)
+    FORMAT=http-380
+    ;;
+    
+  *"youtube.com"*|*"googlevideo.com"*)
+    FORMAT=43
+    ;;
+    
+esac
+
+TITLE=$(get_title)
+SOURCE=$(get_url)
+OSD=3
+
+# Notify user that a media is about to be played
+notify-send \
+--urgency=low \
+--expire-time=3000 \
+--icon=media-playback-start \
+"Playing Media" \
+"Media will be played, shortly"
+
+# check whether resulted URL starts with https
+if [[ ${SOURCE} == https* ]]; then
+  
+  # --external-downloader COMMAND
+  #   Use the specified external downloader. Currently supports
+  #   aria2c,avconv,axel,curl,ffmpeg,httpie,wget
+  #
+  # --external-downloader-args ARGS
+  #   Give these arguments to the external downloader
+  
+  # Output data using wget to stdin and pipe it to mplayer
+  # This is a workaround due to mplayer not handling https
+  wget \
+  --no-proxy -q -O- "$SOURCE" |
+  mplayer \
+  -title "$TITLE" \
+  -osdlevel ${OSD} -
+  tput bold
+  echo "Playing using mplayer. $TIMEOUT seconds timeout"
+  tput sgr0
+  sleep "$TIMEOUT"
+  mplayer "$SOURCE" \
+  -osdlevel ${OSD} \
+  -title "$TITLE"
+  sleep "$TIMEOUT"
+  
+else
+  
+  mplayer "$SOURCE" \
+  -osdlevel ${OSD} \
+  -title "$TITLE"
+  
+fi
+
+# Check whether shell is open or not
+if [ -t 1 ]; then
+  
+  echo "Do you want to save video \"$TITLE\" to your drive (Y/N)?"
+  read -r ANSWER
+  
+else
+  
+  dialog_question
+  
+fi
+
+if [[ ${ANSWER} == "y" || ${ANSWER} == "Y" || ${ANSWER} == 0 ]]; then
+  
+  if [ -z ${DIALOG+x} ]; then
+  #if [[ ${ANSWER} != 0 ]]; then
+  
+    get_video
+    
+  else
+    
+    get_video | set_value_percent | dialog_progress
+    
+  fi
+  
+  notify-send \
+  --urgency=low \
+  --expire-time=5000 \
+  --icon=document-save \
+  "Done" \
+  "Video has been saved to disk"
+  
+  echo Download has been finished
+  # Comment this due to GUI
+  #echo Press Return to exit
+  #read
+  
+else
+  
+  notify-send \
+  --urgency=low \
+  --expire-time=5000 \
+  --icon=application-exit \
+  "Quit" \
+  "Exiting"
+  
+  echo Exiting...
+  sleep "$TIMEOUT"
+  
+fi
